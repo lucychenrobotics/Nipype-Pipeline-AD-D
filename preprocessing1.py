@@ -22,12 +22,14 @@ from nipype.interfaces.matlab import MatlabCommand
 # preprocess(studyfile, startSubject, endSubject):
 
 #Have to check this path
-MatlabCommand.set_default_paths('/usr/local/MATLAB/R2014a/toolbox/spm12')
-MatlabCommand.set_default_matlab_cmd("matlab -nodesktop -nosplash")
+MatlabCommand.set_default_paths('/Users/lighthalllab/Documents/MATLAB/toolbox/spm12') 
+MatlabCommand.set_default_matlab_cmd("/Applications/MATLAB_R2015a.app/bin/matlab -nodesktop -nosplash")
 
 # FreeSurfer - Specify the location of the freesurfer folder
-fs_dir = '/Volumes/Research2/Lighthall_Lab/experiments/CJfMRI/data/fmri/Lucy_testing/Copy/Func/freesurfer'
+fs_dir = '/Applications/freesurfer'
+#'/Volumes/Research2/Lighthall_Lab/experiments/CJfMRI/data/fmri/Lucy_testing/Copy/Func/freesurfer'
 FSCommand.set_default_subjects_dir(fs_dir)
+FREESURFER_HOME = '/Applications/freesurfer'
 
 
 ###
@@ -46,9 +48,13 @@ print("finish set up")
 # Specify Preprocessing Nodes
 
 # Despike - Removes 'spikes' from the 3D+time input dataset
+bet = MapNode(BET(output_type='NIFTI'), name='bet', iterfield = ['in_file'])
+
+"""
+
 despike = MapNode(Despike(outputtype='NIFTI'),
                   name="despike", iterfield=['in_file'])
-
+"""
 # Slicetiming - correct for slice wise acquisition
 interleaved_order = list(range(1,number_of_slices+1,2)) + list(range(2,number_of_slices+1,2))
 sliceTiming = Node(SliceTiming(num_slices=number_of_slices,
@@ -59,7 +65,6 @@ sliceTiming = Node(SliceTiming(num_slices=number_of_slices,
                    name="sliceTiming")
 
 #note added
-bet = Node(BET(), name='bet_node')
 
 # Realign - correct for motion
 realign = Node(Realign(register_to_mean=True),
@@ -115,9 +120,9 @@ print("finished nodes")
 preproc = Workflow(name='preproc')
 
 # Connect all components of the preprocessing workflow
-preproc.connect([(despike, sliceTiming, [('out_file', 'in_files')]),
-                 (sliceTiming, bet, [('timecorrected_files', 'in_file')]),
-                 (bet, realign, [('out_file', 'in_files')]),
+preproc.connect([(bet, sliceTiming, [('out_file', 'in_files')]),
+                 #(sliceTiming, bet, [('timecorrected_files', 'in_file')]),
+                 (sliceTiming, realign, [('timecorrected_files', 'in_files')]),
                  (realign, tsnr, [('realigned_files', 'in_file')]),
                  (tsnr, art, [('detrended_file', 'realigned_files')]),
                  (realign, art, [('mean_image', 'mask_file'),
@@ -131,6 +136,8 @@ preproc.connect([(despike, sliceTiming, [('out_file', 'in_files')]),
                  (realign, applyVolTrans, [('mean_image', 'source_file')]),
                  (applyVolTrans, binarize, [('transformed_file', 'in_file')]),
                  ])
+
+
 
 
 
@@ -316,7 +323,7 @@ datasink = Node(DataSink(base_directory=experiment_dir,
 
 # Use the following DataSink output substitutions
 substitutions = [('_subject_id_', ''),
-                 ('_despike', ''),
+                 #('_despike', ''),
                  ('_detrended', ''),
                  ('_warped', '')]
 datasink.inputs.substitutions = substitutions
@@ -327,7 +334,7 @@ metaflow.connect([(infosource, selectfiles, [('subject_id', 'subject_id')]),
                                           'bbregister.subject_id'),
                                          ('subject_id',
                                           'fssource.subject_id')]),
-                  (selectfiles, preproc, [('func', 'sliceTiming.in_file')]),
+                  (selectfiles, preproc, [('func', 'bet.in_file')]),
                   (preproc, datasink, [('realign.mean_image',
                                         'preprocout.@mean'),
                                        ('realign.realignment_parameters',
@@ -354,4 +361,5 @@ print("before graph")
 #metaflow.write_graph(graph2use='colored')
 print("done building")
 metaflow.run('MultiProc', plugin_args={'n_procs': 6})
+print(bet.out_file)
 
