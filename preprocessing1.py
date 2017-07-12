@@ -6,7 +6,7 @@ from nipype.interfaces.afni import Despike
 from nipype.interfaces.freesurfer import (BBRegister, ApplyVolTransform,
                                           Binarize, MRIConvert, FSCommand)
 from nipype.interfaces.spm import (SliceTiming, Realign, Smooth, Level1Design,
-                                   EstimateModel, EstimateContrast)
+                                   EstimateModel, EstimateContrast, Coregister)
 from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.io import FreeSurferSource, SelectFiles, DataSink
 from nipype.algorithms.rapidart import ArtifactDetect
@@ -26,15 +26,15 @@ MatlabCommand.set_default_paths('/Users/lighthalllab/Documents/MATLAB/toolbox/sp
 MatlabCommand.set_default_matlab_cmd("/Applications/MATLAB_R2015a.app/bin/matlab -nodesktop -nosplash")
 
 # FreeSurfer - Specify the location of the freesurfer folder
-fs_dir = '/Applications/freesurfer'
-#'/Volumes/Research2/Lighthall_Lab/experiments/CJfMRI/data/fmri/Lucy_testing/Copy/Func/freesurfer'
+fs_dir = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func/freesurfer'
+#'/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func/freesurfer'
 FSCommand.set_default_subjects_dir(fs_dir)
-FREESURFER_HOME = '/Applications/freesurfer'
+
 
 
 ###
 # Specify variables
-experiment_dir = '/Volumes/Research2/Lighthall_Lab/experiments/CJfMRI/data/fmri/Lucy_testing/Copy/Func'          # location of experiment folder
+experiment_dir = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func'          # location of experiment folder
 subject_list = ["1002", "1003", "1004"]                   # list of subject identifiers
 output_dir = 'output_fMRI_example_1st'        # name of 1st-level output folder
 working_dir = 'workingdir_fMRI_example_1st'   # name of 1st-level working directory
@@ -46,6 +46,21 @@ fwhm_size = 6                                 # size of FWHM in mm
 print("finish set up")
 ###
 # Specify Preprocessing Nodes
+
+infosource = Node(IdentityInterface(fields=['subject_id']),
+                  name="infosource")
+infosource.iterables = [('subject_id', subject_list)]
+
+
+
+#specifically for the bbregister to get the anatomical scans
+templates2 = {'func': 'freesurfer/{subject_id}/mri/orig.nii.gz'}
+selectfiles2 = Node(SelectFiles(templates2,
+                               base_directory=experiment_dir),
+                   name="selectfiles")
+
+
+
 
 # Despike - Removes 'spikes' from the 3D+time input dataset
 bet = MapNode(BET(output_type='NIFTI'), name='bet', iterfield = ['in_file'])
@@ -80,26 +95,32 @@ art = Node(ArtifactDetect(norm_threshold=1,
                           zintensity_threshold=3,
                           mask_type='file',
                           parameter_source='SPM',
-                          use_differences=[True, False]),
+                         # use_differences=[True, False]
+                         ),
            name="art")
 
 # Gunzip - unzip functional
 gunzip = MapNode(Gunzip(), name="gunzip", iterfield=['in_file'])
+
+#Gunzip - unzip anatomical
+gunzip2 = MapNode(Gunzip(), name="gunzip2", iterfield=['in_file'])
+
 
 # Smooth - to smooth the images with a given kernel
 smooth = Node(Smooth(fwhm=fwhm_size),
               name="smooth")
 
 # FreeSurferSource - Data grabber specific for FreeSurfer data
-fssource = Node(FreeSurferSource(subjects_dir=fs_dir),
-                run_without_submitting=True,
-                name='fssource')
+
+
 
 # BBRegister - coregister a volume to the Freesurfer anatomical
-bbregister = Node(BBRegister(init='fsl',
-                             contrast_type='t2',
+"""bbregister = Node(BBRegister(init='fsl',
+                             contrast_type='t1',
                              out_fsl_file=True),
-                  name='bbregister')
+                  name='bbregister')"""
+
+coregister = Node(Coregister(), name='coregister')
 
 # Volume Transformation - transform the brainmask into functional space
 applyVolTrans = Node(ApplyVolTransform(inverse=True),
@@ -120,7 +141,11 @@ print("finished nodes")
 preproc = Workflow(name='preproc')
 
 # Connect all components of the preprocessing workflow
+# Coregister: source image is the anatomical image, mean_image is the functional image
 preproc.connect([(bet, sliceTiming, [('out_file', 'in_files')]),
+                 (infosource, selectfiles2, [('subject_id', 'subject_id')]),
+                 (selectfiles2, gunzip2, [('func', 'in_file')]),
+                 (gunzip2, coregister, [('out_file', 'source')]),
                  #(sliceTiming, bet, [('timecorrected_files', 'in_file')]),
                  (sliceTiming, realign, [('timecorrected_files', 'in_files')]),
                  (realign, tsnr, [('realigned_files', 'in_file')]),
@@ -130,9 +155,9 @@ preproc.connect([(bet, sliceTiming, [('out_file', 'in_files')]),
                                   'realignment_parameters')]),
                  (tsnr, gunzip, [('detrended_file', 'in_file')]),
                  (gunzip, smooth, [('out_file', 'in_files')]),
-                 (realign, bbregister, [('mean_image', 'source_file')]),
-                 (fssource, applyVolTrans, [('brainmask', 'target_file')]),
-                 (bbregister, applyVolTrans, [('out_reg_file', 'reg_file')]),
+                 (realign, coregister, [('mean_image', 'target')]),
+                 (selectfiles2, applyVolTrans, [('func', 'target_file')]),
+                 (coregister, applyVolTrans, [('coregistered_source', 'reg_file')]),
                  (realign, applyVolTrans, [('mean_image', 'source_file')]),
                  (applyVolTrans, binarize, [('transformed_file', 'in_file')]),
                  ])
@@ -246,7 +271,7 @@ contrast_list = [cont01, cont02, cont03, cont04, cont05, cont06]
 # Function to get Subject specific condition information
 def get_subject_info(subject_id):
     from os.path import join as opj
-    path = '/Volumes/Research2/Lighthall_Lab/experiments/CJfMRI/data/fmri/Lucy_testing/Nipype/nipype_tutorial/data/%s' % subject_id
+    path = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Nipype/nipype_tutorial/data/%s' % subject_id
     onset_info = []
     for run in ['01', '02']:
         for cond in ['01', '02', '03', '04']:
@@ -316,6 +341,8 @@ selectfiles = Node(SelectFiles(templates,
                                base_directory=experiment_dir),
                    name="selectfiles")
 
+
+
 # Datasink - creates output folder for important outputs
 datasink = Node(DataSink(base_directory=experiment_dir,
                          container=output_dir),
@@ -330,10 +357,8 @@ datasink.inputs.substitutions = substitutions
 
 # Connect Infosource, SelectFiles and DataSink to the main workflow
 metaflow.connect([(infosource, selectfiles, [('subject_id', 'subject_id')]),
-                  (infosource, preproc, [('subject_id',
-                                          'bbregister.subject_id'),
-                                         ('subject_id',
-                                          'fssource.subject_id')]),
+                  #(infosource, selectfiles2, [('subject_id', 'subject_anat')]),
+                  #(selectfiles2, preproc, [('func', 'bbregister.source_file')]),
                   (selectfiles, preproc, [('func', 'bet.in_file')]),
                   (preproc, datasink, [('realign.mean_image',
                                         'preprocout.@mean'),
@@ -345,12 +370,8 @@ metaflow.connect([(infosource, selectfiles, [('subject_id', 'subject_id')]),
                                         'preprocout.@plot'),
                                        ('binarize.binary_file',
                                         'preprocout.@brainmask'),
-                                       ('bbregister.out_reg_file',
-                                        'bbregister.@out_reg_file'),
-                                       ('bbregister.out_fsl_file',
-                                        'bbregister.@out_fsl_file'),
-                                       ('bbregister.registered_file',
-                                        'bbregister.@registered_file'),
+                                       ('coregister.coregistered_files',
+                                        'preprocout.@coregistered_files'),
                                        ]),
                   ])
 
@@ -358,7 +379,7 @@ metaflow.connect([(infosource, selectfiles, [('subject_id', 'subject_id')]),
 ###
 # Run Workflow
 print("before graph")
-#metaflow.write_graph(graph2use='colored')
+metaflow.write_graph(graph2use='colored')
 print("done building")
 metaflow.run('MultiProc', plugin_args={'n_procs': 6})
 print(bet.out_file)
