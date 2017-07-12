@@ -1,4 +1,69 @@
-###
+###NOTES:
+"""
+DEPENDENCY ISSUES:
+1. If you decide to use freesurfer, make sure FREESURFER_HOME is environment variable on your computer.
+For macs it said to put it in .bhrc or something but for the lab mac, it's a different extension for some reason.
+**look for where the variables on your computer are stored**
+2. To draw the workflow graph, you have to make sure to have dot downloaded.
+
+FORMAT ISSUES:
+1. If it is a function where it would like all of the outputs of the previous node (it requests a list like sliceTiming),
+make the previous node is a map node.
+Refer to the bet node for example.
+2. To unzip a file use gunzip
+3. Here are some functions for converting formats so donut fret:
+convert2nii = Node(MRIConvert(out_type='nii'), name='convert2nii')
+
+
+FINDING FILES:
+1.Freesurfer has a weird way of looking for files, this is the method they use. You will need this to pass in subject_id
+and your folders will have to be in a certain format for it to work.
+# FreeSurferSource - Data grabber specific for FreeSurfer data
+fssource = Node(FreeSurferSource(subjects_dir=fs_dir),
+                run_without_submitting=True,
+                name='fssource')
+
+2. There is a file grabber called datagrabber (kind of confusing), however 3. is another way to do it
+3. 
+#This will go through each subject_id, you can pass this into anything that needs subject_id
+infosource = Node(IdentityInterface(fields=['subject_id']),
+                  name="infosource")
+infosource.iterables = [('subject_id', subject_list)]
+
+#define what the file name will be, with {} around variables you put in
+templates = {'func': 'data/{subject_id}/mri/func.nii.gz',
+             'struct': 'freesurfer/{subject_id}/mri/brainmask.nii.gz'}
+selectfiles = Node(SelectFiles(templates2,
+                               base_directory=experiment_dir),
+                   name="selectfiles")
+
+#Gunzip if you need to unzip, otherwise leave this part out
+gunzip = Node(Gunzip(), name="gunzip")
+
+
+
+#HOW TO CONNECT THEM
+workflowname.connect([(infosource, selectfiles2, [('subject_id', 'subject_id')]),
+                      (selectfiles2, gunzip2, [('func', 'in_file')]),
+                      (gunzip2, coregister, [('out_file', 'source')]),
+                      ])
+
+
+
+FOR HELP:
+1. Tutorials used: 
+http://miykael.github.io/nipype-beginner-s-guide/firstLevel.html
+http://nipype.readthedocs.io/en/latest/users/examples/fmri_spm.html
+2. To get help on a function, type Function.help() for the mandatory and optional inputs and outputs 
+EXAMPLE: BET.help()
+3. To read pklz files (this is the file type for the crash files) go onto commandline and type:
+nipypecli crash /filelocation/filename.pklz
+To see what nipypecli can do, just type nipypecli
+nipype_read_crash does not work! Do not use this.
+
+
+
+"""
 # Import modules
 from os.path import join as opj
 from nipype.interfaces.fsl import BET
