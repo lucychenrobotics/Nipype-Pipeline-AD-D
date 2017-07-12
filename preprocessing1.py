@@ -6,7 +6,7 @@ from nipype.interfaces.afni import Despike
 from nipype.interfaces.freesurfer import (BBRegister, ApplyVolTransform,
                                           Binarize, MRIConvert, FSCommand)
 from nipype.interfaces.spm import (SliceTiming, Realign, Smooth, Level1Design,
-                                   EstimateModel, EstimateContrast, Coregister)
+                                   EstimateModel, EstimateContrast, Coregister, Normalize)
 from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.io import FreeSurferSource, SelectFiles, DataSink
 from nipype.algorithms.rapidart import ArtifactDetect
@@ -43,6 +43,8 @@ number_of_slices = 38                         # number of slices in volume
 TR = 2.0                                      # time repetition of volume
 fwhm_size = 6                                 # size of FWHM in mm
 
+TPMLocation = "/Applications/MATLAB_R2015a.app/toolbox/spm12/tpm/TPM.nii"
+
 print("finish set up")
 ###
 # Specify Preprocessing Nodes
@@ -54,7 +56,7 @@ infosource.iterables = [('subject_id', subject_list)]
 
 
 #specifically for the bbregister to get the anatomical scans
-templates2 = {'func': 'freesurfer/{subject_id}/mri/orig.nii.gz'}
+templates2 = {'func': 'freesurfer/{subject_id}/mri/brainmask.nii.gz'}
 selectfiles2 = Node(SelectFiles(templates2,
                                base_directory=experiment_dir),
                    name="selectfiles")
@@ -95,7 +97,7 @@ art = Node(ArtifactDetect(norm_threshold=1,
                           zintensity_threshold=3,
                           mask_type='file',
                           parameter_source='SPM',
-                         # use_differences=[True, False]
+                          use_differences=[True, False]
                          ),
            name="art")
 
@@ -103,7 +105,7 @@ art = Node(ArtifactDetect(norm_threshold=1,
 gunzip = MapNode(Gunzip(), name="gunzip", iterfield=['in_file'])
 
 #Gunzip - unzip anatomical
-gunzip2 = MapNode(Gunzip(), name="gunzip2", iterfield=['in_file'])
+gunzip2 = Node(Gunzip(), name="gunzip2")
 
 
 # Smooth - to smooth the images with a given kernel
@@ -123,8 +125,13 @@ smooth = Node(Smooth(fwhm=fwhm_size),
 coregister = Node(Coregister(), name='coregister')
 
 # Volume Transformation - transform the brainmask into functional space
-applyVolTrans = Node(ApplyVolTransform(inverse=True),
-                     name='applyVolTrans')
+"""applyVolTrans = Node(ApplyVolTransform(inverse=True),
+                     name='applyVolTrans')"""
+
+
+#replaces volume transformation
+normalize = Node(interface=Normalize(), name="normalize")
+normalize.inputs.template = TPMLocation
 
 # Binarize -  binarize and dilate an image to create a brainmask
 binarize = Node(Binarize(min=0.5,
@@ -156,10 +163,11 @@ preproc.connect([(bet, sliceTiming, [('out_file', 'in_files')]),
                  (tsnr, gunzip, [('detrended_file', 'in_file')]),
                  (gunzip, smooth, [('out_file', 'in_files')]),
                  (realign, coregister, [('mean_image', 'target')]),
-                 (selectfiles2, applyVolTrans, [('func', 'target_file')]),
-                 (coregister, applyVolTrans, [('coregistered_source', 'reg_file')]),
-                 (realign, applyVolTrans, [('mean_image', 'source_file')]),
-                 (applyVolTrans, binarize, [('transformed_file', 'in_file')]),
+                 (gunzip2, normalize, [('out_file', 'source')]),
+                 (coregister, normalize, [('coregistered_files', 'apply_to_files')]),
+                 #(coregister, normalize, [('coregistered_source', 'source')]),
+                 #(realign, applyVolTrans, [('mean_image', 'source_file')]),
+                 #(applyVolTrans, binarize, [('transformed_file', 'in_file')]),
                  ])
 
 
@@ -368,14 +376,13 @@ metaflow.connect([(infosource, selectfiles, [('subject_id', 'subject_id')]),
                                         'preprocout.@outliers'),
                                        ('art.plot_files',
                                         'preprocout.@plot'),
-                                       ('binarize.binary_file',
-                                        'preprocout.@brainmask'),
                                        ('coregister.coregistered_files',
                                         'preprocout.@coregistered_files'),
                                        ]),
                   ])
 
-
+"""('binarize.binary_file',
+                                        'preprocout.@brainmask'),"""
 ###
 # Run Workflow
 print("before graph")
