@@ -99,13 +99,20 @@ FSCommand.set_default_subjects_dir(fs_dir)"""
 ###
 # Specify variables
 experiment_dir = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func'          # location of experiment folder
-subject_list = ["1002", "1003", "1004"]                   # list of subject identifiers
 output_dir = 'output_fMRI_example_1st'        # name of 1st-level output folder
-working_dir = 'workingdir_fMRI_example_2nd'   # name of 1st-level working directory
+working_dir = 'workingdir_fMRI_example_4rd'   # name of 1st-level working directory
+
+subject_list = ["1002", "1003"]      # list of subject identifiers
+session_list = ['Enc1', 'Jud2']          # list of session identifiers
+
+
+
+
 
 number_of_slices = 38                         # number of slices in volume
 TR = 2.0                                      # time repetition of volume
-fwhm_size = 6                                 # size of FWHM in mm
+smoothing_size = 8                        # size of FWHM in mm
+
 
 TPMLocation = "/Applications/MATLAB_R2015a.app/toolbox/spm12/tpm/TPM.nii"
 
@@ -113,16 +120,23 @@ print("finish set up")
 ###
 # Specify Preprocessing Nodes
 
-
-info = dict(func=[['subject_id', ['Enc1', 'Enc2', 'Enc3', 'Jud1', 'Jud2']]],
-            struct=[['subject_id', 'Struct']])
-
-infosource = Node(interface=IdentityInterface(fields=['subject_id']),
-                     name="infosource")
-
-infosource.iterables = ('subject_id', subject_list)
+# Infosource - a function free node to iterate over the list of subject names
+infosource = Node(IdentityInterface(fields=['subject_id',
+                                            'session_id']),
+                  name="infosource")
 
 
+infosource.iterables = [('subject_id', subject_list),
+                        ('session_id', session_list)]
+
+# SelectFiles
+templates = {'func': 'data/{subject_id}/{session_id}.nii.gz',
+             'struct': 'data/{subject_id}/Struct.nii.gz'}
+selectfiles = Node(SelectFiles(templates,
+                               base_directory=experiment_dir),
+                   name="selectfiles")
+
+"""
 
 datasource = Node(interface=DataGrabber(infields=['subject_id'],
                                                outfields=['func', 'struct']),
@@ -133,36 +147,34 @@ datasource.inputs.base_directory = experiment_dir
 datasource.inputs.template = 'data/%s/%s.nii.gz'
 datasource.inputs.template_args = info
 datasource.inputs.sort_filelist = True
-
+"""
 
 
 
 
 
 # Despike - Removes 'spikes' from the 3D+time input dataset
-bet = MapNode(BET(output_type='NIFTI'), name='bet', iterfield = ['in_file'])
+bet = MapNode(BET(output_type='NIFTI'), name='bet', iterfield='in_file')
 
 """
 
 despike = MapNode(Despike(outputtype='NIFTI'),
                   name="despike", iterfield=['in_file'])
 """
+
+
 # Slicetiming - correct for slice wise acquisition
 interleaved_order = list(range(1,number_of_slices+1,2)) + list(range(2,number_of_slices+1,2))
 sliceTiming = Node(SliceTiming(num_slices=number_of_slices,
                                time_repetition=TR,
                                time_acquisition=TR-TR/number_of_slices,
                                slice_order=interleaved_order,
-                               ref_slice=2),
+                               ref_slice=number_of_slices//2),
                    name="sliceTiming")
-
-#note added
 
 # Realign - correct for motion
 realign = Node(Realign(register_to_mean=True),
                name="realign")
-
-
 # Artifact Detection - determine which of the images in the functional series
 #   are outliers. This is based on deviation in intensity or movement.
 art = Node(ArtifactDetect(norm_threshold=1,
@@ -176,16 +188,42 @@ art = Node(ArtifactDetect(norm_threshold=1,
 #Gunzip - unzip anatomical
 gunzip2 = Node(Gunzip(), name="gunzip2")
 
+gunzip = Node(Gunzip(), name="gunzip")
+
+
+sliceTiming = Node(SliceTiming(num_slices=number_of_slices,
+                               time_repetition=TR,
+                               time_acquisition=TR-TR/number_of_slices,
+                               slice_order=interleaved_order,
+                               ref_slice=19),
+                   name="sliceTiming")
+
+# Realign - correct for motion
+realign = Node(Realign(register_to_mean=True),
+               name="realign")
+
+# Artifact Detection - determine which of the images in the functional series
+#   are outliers. This is based on deviation in intensity or movement.
+art = Node(ArtifactDetect(norm_threshold=1,
+                          zintensity_threshold=3,
+                          mask_type='spm_global',
+                          parameter_source='SPM'),
+           name="art")
+
+# Smooth - to smooth the images with a given kernel
+smooth = Node(Smooth(fwhm=smoothing_size),
+              name="smooth")
+
+
+
+
+
 
 coregister = Node(Coregister(), name='coregister')
 
 #replaces volume transformation
 normalize = Node(interface=Normalize(), name="normalize")
 normalize.inputs.template = TPMLocation
-
-# Smooth - to smooth the images with a given kernel
-smooth = Node(interface=Smooth(fwhm=fwhm_size), name="smooth")
-
 
 
 
@@ -198,17 +236,23 @@ preproc = Workflow(name='preproc')
 
 # Connect all components of the preprocessing workflow
 # Coregister: source image is the anatomical image, mean_image is the functional image
-preproc.connect([(infosource, datasource, [('subject_id', 'subject_id')]),
-                 (datasource, bet, [('func', 'in_file')]),
-                 (bet, sliceTiming, [('out_file', 'in_files')]),
-                 (datasource, gunzip2, [('struct', 'in_file')]),
+preproc.connect([(infosource, selectfiles, [('subject_id', 'subject_id'),
+                                            ('session_id', 'session_id')]),
+                 (selectfiles, gunzip, [('func', 'in_file')]),
+                 #(infosource, datasource, [('subject_id', 'subject_id')]),
+                 #(datasource, bet, [('func', 'in_file')]),
+                 #(datasource, gunzip, [('func', 'in_file')]),
+                 #(datasource, sliceTiming, [('func', 'in_files')]),
+                 #(gunzip, sliceTiming, [('out_file', 'in_files')]),
+                 (gunzip, sliceTiming, [('out_file', 'in_files')]),
+                 (sliceTiming, realign, [('timecorrected_files', 'in_files')]),
+                 (selectfiles, gunzip2, [('struct', 'in_file')]),
                  (gunzip2, coregister, [('out_file', 'source')]),
                  #(sliceTiming, bet, [('timecorrected_files', 'in_file')]),
-                 (sliceTiming, realign, [('timecorrected_files', 'in_files')]),
                  (realign, coregister, [('mean_image', 'target')]),
                  (gunzip2, normalize, [('out_file', 'source')]),
                  (coregister, normalize, [('coregistered_files', 'apply_to_files')]),
-                 (normalize, smooth, [('normalized_files', 'in_files')]),
+                 #(normalize, smooth, [('normalized_files', 'in_files')]),
 
                  #(realign, applyVolTrans, [('mean_image', 'source_file')]),
                  #(applyVolTrans, binarize, [('transformed_file', 'in_file')]),
@@ -255,7 +299,9 @@ substitutions = [('_subject_id_', ''),
 datasink.inputs.substitutions = substitutions
 
 # Connect Infosource, SelectFiles and DataSink to the main workflow
-metaflow.connect([(preproc, datasink, [('realign.mean_image',
+metaflow.connect([(preproc, datasink, [('sliceTiming.timecorrected_files',
+                                        'preprocout.@timecorrect_files'),
+                                       ('realign.mean_image',
                                         'preprocout.@mean'),
                                        ('realign.realignment_parameters',
                                         'preprocout.@parameters'),
