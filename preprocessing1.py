@@ -109,10 +109,10 @@ FSCommand.set_default_subjects_dir(fs_dir)"""
 # Specify variables
 experiment_dir = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func'          # location of experiment folder
 output_dir = 'output_fMRI_example_1st'        # name of 1st-level output folder
-working_dir = 'workingdir_fMRI_example_5rd'   # name of 1st-level working directory
+working_dir = 'workingdir_fMRI_example_8rd'   # name of 1st-level working directory
 
-subject_list = ["1002", "1003"]      # list of subject identifiers
-session_list = ['Enc1', 'Jud2']          # list of session identifiers
+subject_list = ["1002"]      # list of subject identifiers
+session_list = ['Enc1']          # list of session identifiers
 
 
 
@@ -120,7 +120,7 @@ session_list = ['Enc1', 'Jud2']          # list of session identifiers
 
 number_of_slices = 38                         # number of slices in volume
 TR = 2.0                                      # time repetition of volume
-smoothing_size = 8                        # size of FWHM in mm
+smoothing_size = 6                        # size of FWHM in mm
 
 
 TPMLocation = "/Applications/MATLAB_R2015a.app/toolbox/spm12/tpm/TPM.nii"
@@ -140,7 +140,7 @@ infosource.iterables = [('subject_id', subject_list),
 
 # SelectFiles
 templates = {'func': 'data/{subject_id}/{session_id}.nii.gz',
-             'struct': 'data/{subject_id}/Struct.nii.gz'}
+             'struct': 'data/{subject_id}/Struct_brain.nii.gz'}
 selectfiles = Node(SelectFiles(templates,
                                base_directory=experiment_dir),
                    name="selectfiles")
@@ -187,6 +187,8 @@ realign = Node(Realign(register_to_mean=True),
 
 
 #Gunzip - unzip anatomical
+gunzip3 = Node(Gunzip(), name="gunzip3")
+
 gunzip2 = Node(Gunzip(), name="gunzip2")
 
 gunzip = Node(Gunzip(), name="gunzip")
@@ -226,23 +228,16 @@ preproc = Workflow(name='preproc')
 preproc.connect([(infosource, selectfiles, [('subject_id', 'subject_id'),
                                             ('session_id', 'session_id')]),
                  (selectfiles, gunzip, [('func', 'in_file')]),
-                 #(infosource, datasource, [('subject_id', 'subject_id')]),
-                 #(bet, , [('out_file', 'in_file')]),
-                 #(datasource, gunzip, [('func', 'in_file')]),
-                 #(datasource, sliceTiming, [('func', 'in_files')]),
                  (gunzip, sliceTiming, [('out_file', 'in_files')]),
-                 #(bet, sliceTiming, [('out_file', 'in_files')]),
                  (sliceTiming, realign, [('timecorrected_files', 'in_files')]),
                  (selectfiles, gunzip2, [('struct', 'in_file')]),
-                 (gunzip2, coregister, [('out_file', 'source')]),
-                 #(sliceTiming, bet, [('timecorrected_files', 'in_file')]),
-                 (realign, coregister, [('mean_image', 'target')]),
-                 (gunzip2, normalize, [('out_file', 'source')]),
+                 (gunzip2, coregister, [('out_file', 'target')]),
+                 (realign, coregister, [('mean_image', 'source'),
+                                           ('realigned_files', 'apply_to_files')]),
+                 (selectfiles, gunzip3, [('struct', 'in_file')]),
+                 (gunzip3, normalize, [('out_file', 'source')]),
                  (coregister, normalize, [('coregistered_files', 'apply_to_files')]),
                  (normalize, smooth, [('normalized_files', 'in_files')]),
-
-                 #(realign, applyVolTrans, [('mean_image', 'source_file')]),
-                 #(applyVolTrans, binarize, [('transformed_file', 'in_file')]),
                  ])
 
 
@@ -287,13 +282,17 @@ datasink.inputs.substitutions = substitutions
 
 # Connect Infosource, SelectFiles and DataSink to the main workflow
 metaflow.connect([(preproc, datasink, [('sliceTiming.timecorrected_files',
-                                        'preprocout.@timecorrect_files'),
+                                        'preprocout.timecorrected.@timecorrect_files'),
                                        ('realign.mean_image',
                                         'preprocout.@mean'),
                                        ('realign.realignment_parameters',
                                         'preprocout.@parameters'),
                                        ('coregister.coregistered_files',
                                         'preprocout.@coregistered_files'),
+                                       ('normalize.normalized_files',
+                                        'preprocout.@normalized_files'),
+                                       ('smooth.smoothed_files',
+                                        'preprocout.@smoothed_files'),
                                        ]),
                   ])
 
@@ -304,6 +303,6 @@ metaflow.connect([(preproc, datasink, [('sliceTiming.timecorrected_files',
 print("before graph")
 metaflow.write_graph(graph2use='colored')
 print("done building")
-metaflow.run('MultiProc', plugin_args={'n_procs': 6})
+metaflow.run()
 
 
