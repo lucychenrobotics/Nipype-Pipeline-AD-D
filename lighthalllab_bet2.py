@@ -3,11 +3,10 @@ from os.path import join as opj
 from nipype.interfaces.utility import IdentityInterface
 from nipype.interfaces.io import SelectFiles, DataSink
 from nipype.pipeline.engine import Workflow, Node
-import scipy
 
 
 #replace
-experiment_dir = "/Volumes/Research2/Lighthall_Lab/Experiments/CJfMRI/data/fmri/Lucy_testing/Copy"        # location of experiment folder
+experiment_dir = ""        # location of experiment folder
 data_dir = opj(experiment_dir, 'data')  # location of data folder
 
 
@@ -37,7 +36,7 @@ infosource.iterables = [('subject_id', subject_list),
                         ('session_id', session_list)]
 
 # SelectFiles
-templates = {'func': 'Anat/{subject_id}/anat{subject_id}.nii.gz'}
+templates = {'func': '{subject_id}/Struct.nii.gz'}
 selectfiles = Node(SelectFiles(templates,
                                base_directory=experiment_dir),
                    name="selectfiles")

@@ -108,11 +108,11 @@ FSCommand.set_default_subjects_dir(fs_dir)"""
 ###
 # Specify variables
 experiment_dir = '/Volumes/Research2/Lighthall_Lab/experiments/cjfmri-1/data/fmri/Lucy_testing/Copy/Func'          # location of experiment folder
-output_dir = 'output_fMRI_example_1st'        # name of 1st-level output folder
-working_dir = 'workingdir_fMRI_example_8rd'   # name of 1st-level working directory
+output_dir = 'output_fMRI_example_15rd'        # name of 1st-level output folder
+working_dir = 'workingdir_fMRI_example_15rd'   # name of 1st-level working directory
 
 subject_list = ["1002", "1003", "1004"]      # list of subject identifiers
-session_list = ['Enc1', 'Enc2', 'Jud1']          # list of session identifiers
+session_list = ['Enc2']          # list of session identifiers
 
 
 
@@ -140,7 +140,7 @@ infosource.iterables = [('subject_id', subject_list),
 
 # SelectFiles
 templates = {'func': 'data/{subject_id}/{session_id}.nii.gz',
-             'struct': 'data/{subject_id}/Struct_brain.nii.gz'}
+             'struct': 'data/{subject_id}/Struct.nii.gz'}
 selectfiles = Node(SelectFiles(templates,
                                base_directory=experiment_dir),
                    name="selectfiles")
@@ -163,7 +163,8 @@ datasource.inputs.sort_filelist = True
 
 
 # Despike - Removes 'spikes' from the 3D+time input dataset
-bet = Node(BET(output_type='NIFTI'), name='bet')
+skullstrip = Node(interface=BET(), name="skullstrip")
+skullstrip.inputs.mask = True
 
 """
 
@@ -233,14 +234,12 @@ preproc.connect([(infosource, selectfiles, [('subject_id', 'subject_id'),
                  (selectfiles, gunzip2, [('struct', 'in_file')]),
                  (gunzip2, coregister, [('out_file', 'target')]),
                  (realign, coregister, [('mean_image', 'source'),
-                                           ('realigned_files', 'apply_to_files')]),
+                                        ('realigned_files', 'apply_to_files')]),
                  (gunzip2, normalize, [('out_file', 'source')]),
                  (coregister, normalize, [('coregistered_files', 'apply_to_files')]),
                  (normalize, smooth, [('normalized_files', 'in_files')]),
+                 (normalize, skullstrip, [('normalized_source', 'in_file')]),
                  ])
-
-
-
 
 
 print("finish preprocess workflow")
@@ -286,12 +285,12 @@ metaflow.connect([(preproc, datasink, [('sliceTiming.timecorrected_files',
                                         'preprocout.@mean'),
                                        ('realign.realignment_parameters',
                                         'preprocout.realign.@parameters'),
-                                       ('coregister.coregistered_files',
-                                        'preprocout.coregister.@coregistered_files'),
                                        ('normalize.normalized_files',
                                         'preprocout.normalized.@normalized_files'),
                                        ('smooth.smoothed_files',
                                         'preprocout.smoothed.@smoothed_files'),
+                                       ('skullstrip.out_file',
+                                        'preprocout.bet.@out_file'),
                                        ]),
                   ])
 
